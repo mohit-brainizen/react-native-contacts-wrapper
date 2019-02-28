@@ -1,3 +1,5 @@
+
+
 //
 //  RCTContactsWrapper.m
 //  RCTContactsWrapper
@@ -25,16 +27,37 @@ const int REQUEST_EMAIL = 2;
 
 RCT_EXPORT_MODULE(ContactsWrapper);
 
+RCT_EXPORT_METHOD(checkPermission:(RCTResponseSenderBlock) callback)
+{
+  CNAuthorizationStatus authStatus = [CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts];
+  if (authStatus == CNAuthorizationStatusDenied || authStatus == CNAuthorizationStatusRestricted){
+    callback(@[[NSNull null], @"denied"]);
+  } else if (authStatus == CNAuthorizationStatusAuthorized){
+    callback(@[[NSNull null], @"authorized"]);
+  } else {
+    callback(@[[NSNull null], @"undefined"]);
+  }
+}
+
+RCT_EXPORT_METHOD(requestPermission:(RCTResponseSenderBlock) callback)
+{
+  CNContactStore* contactStore = [[CNContactStore alloc] init];
+
+  [contactStore requestAccessForEntityType:CNEntityTypeContacts completionHandler:^(BOOL granted, NSError * _Nullable error) {
+    [self checkPermission:callback];
+  }];
+}
+
 /* Get basic contact data as JS object */
 RCT_EXPORT_METHOD(getContact:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
   {
     self._resolve = resolve;
     self._reject = reject;
     _requestCode = REQUEST_CONTACT;
-    
+
     [self launchContacts];
-    
-    
+
+
   }
 
 /* Get ontact email as string */
@@ -43,10 +66,10 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
   self._resolve = resolve;
   self._reject = reject;
   _requestCode = REQUEST_EMAIL;
-  
+
   [self launchContacts];
-  
-  
+
+
 }
 
 
@@ -54,7 +77,7 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
  Launch the contacts UI
  */
 -(void) launchContacts {
-  
+
   UIViewController *picker;
   if([CNContactPickerViewController class]) {
     //iOS 9+
@@ -69,12 +92,12 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
   UIViewController *root = [[[UIApplication sharedApplication] delegate] window].rootViewController;
   BOOL modalPresent = (BOOL) (root.presentedViewController);
   if (modalPresent) {
-	  UIViewController *parent = root.presentedViewController;
-	  [parent presentViewController:picker animated:YES completion:nil];
+    UIViewController *parent = root.presentedViewController;
+    [parent presentViewController:picker animated:YES completion:nil];
   } else {
-	  [root presentViewController:picker animated:YES completion:nil];
+    [root presentViewController:picker animated:YES completion:nil];
   }
-  
+
 }
 
 
@@ -131,25 +154,44 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
        This could also be extended to return arrays of phone numbers, email addresses etc. instead of jsut first found
        */
       NSMutableDictionary *contactData = [self emptyContactDict];
-      
+
       NSString *fullName = [self getFullNameForFirst:contact.givenName middle:contact.middleName last:contact.familyName ];
       NSArray *phoneNos = contact.phoneNumbers;
-      NSArray *emailAddresses = contact.emailAddresses;
-      
+//      NSArray *emailAddresses = contact.emailAddresses;
+      NSMutableArray *emailAddreses = [[NSMutableArray alloc] init];
       //Return full name
       [contactData setValue:fullName forKey:@"name"];
-      
+
       //Return first phone number
       if([phoneNos count] > 0) {
         CNPhoneNumber *phone = ((CNLabeledValue *)phoneNos[0]).value;
         [contactData setValue:phone.stringValue forKey:@"phone"];
       }
-      
-      //Return first email address
-      if([emailAddresses count] > 0) {
-        [contactData setValue:((CNLabeledValue *)emailAddresses[0]).value forKey:@"email"];
+
+      for (CNLabeledValue<NSString*>* labeledValue in contact.emailAddresses) {
+        NSMutableDictionary* email = [NSMutableDictionary dictionary];
+        NSString* label = [CNLabeledValue localizedStringForLabel:[labeledValue label]];
+        NSString* value = [labeledValue value];
+
+        if(value) {
+          if(!label) {
+            label = [CNLabeledValue localizedStringForLabel:@"other"];
+          }
+          [email setObject: value forKey:@"email"];
+          [email setObject: label forKey:@"label"];
+          [emailAddreses addObject:email];
+        } else {
+          NSLog(@"ignoring blank email");
+        }
       }
-      
+
+
+      [contactData setObject: emailAddreses forKey:@"emails"];
+      //Return first email address
+//      if([emailAddresses count] > 0) {
+//        [contactData setValue:((CNLabeledValue *)emailAddresses[0]).value forKey:@"email"];
+//      }
+
       [self contactPicked:contactData];
     }
       break;
@@ -160,7 +202,7 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
         [self pickerNoEmail];
         return;
       }
-      
+
       CNLabeledValue *email = contact.emailAddresses[0].value;
       [self emailPicked:email];
     }
@@ -170,8 +212,8 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
       [self pickerError];
     break;
   }
-  
-  
+
+
 }
 
 
@@ -188,7 +230,7 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
   switch(_requestCode) {
     case(REQUEST_CONTACT):
     {
-      
+
       /* Return NSDictionary ans JS Object to RN, containing basic contact data
        This is a starting point, in future more fields should be added, as required.
        This could also be extended to return arrays of phone numbers, email addresses etc. instead of jsut first found
@@ -198,26 +240,26 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
       fNameObject = (__bridge NSString *) ABRecordCopyValue(person, kABPersonFirstNameProperty);
       mNameObject = (__bridge NSString *) ABRecordCopyValue(person, kABPersonMiddleNameProperty);
       lNameObject = (__bridge NSString *) ABRecordCopyValue(person, kABPersonLastNameProperty);
-      
+
       NSString *fullName = [self getFullNameForFirst:fNameObject middle:mNameObject last:lNameObject];
-      
+
       //Return full name
       [contactData setValue:fullName forKey:@"name"];
-      
+
       //Return first phone number
       ABMultiValueRef phoneMultiValue = ABRecordCopyValue(person, kABPersonPhoneProperty);
       NSArray *phoneNos = (__bridge NSArray *)ABMultiValueCopyArrayOfAllValues(phoneMultiValue);
       if([phoneNos count] > 0) {
         [contactData setValue:phoneNos[0] forKey:@"phone"];
       }
-     
+
       //Return first email
       ABMultiValueRef emailMultiValue = ABRecordCopyValue(person, kABPersonEmailProperty);
       NSArray *emailAddresses = (__bridge NSArray *)ABMultiValueCopyArrayOfAllValues(emailMultiValue);
       if([emailAddresses count] > 0) {
         [contactData setValue:emailAddresses[0] forKey:@"email"];
       }
-      
+
 
       [self contactPicked:contactData];
     }
@@ -231,7 +273,7 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
         [self pickerNoEmail];
         return;
       }
-      
+
       [self emailPicked:emailAddresses[0]];
     }
       break;
@@ -241,7 +283,7 @@ RCT_EXPORT_METHOD(getEmail:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseR
       [self pickerError];
       return;
   }
-  
+
 }
 
 - (void)peoplePickerNavigationControllerDidCancel:(ABPeoplePickerNavigationController *)peoplePicker {
